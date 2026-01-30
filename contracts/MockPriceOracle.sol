@@ -9,13 +9,13 @@ import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
  */
 contract MockPriceOracle is AggregatorV3Interface {
     int256 private price;
-    uint8 private decimals;
-    string private description;
+    uint8 private _decimals;
+    string private _description;
     
-    constructor(int256 _initialPrice, uint8 _decimals) {
+    constructor(int256 _initialPrice, uint8 decimalsValue) {
         price = _initialPrice;
-        decimals = _decimals;
-        description = "Mock BNB/USD Price Feed";
+        _decimals = decimalsValue;
+        _description = "Mock BNB/USD Price Feed";
     }
     
     function setPrice(int256 _price) external {
@@ -65,11 +65,11 @@ contract MockPriceOracle is AggregatorV3Interface {
     }
     
     function decimals() external view override returns (uint8) {
-        return decimals;
+        return _decimals;
     }
     
     function description() external view override returns (string memory) {
-        return description;
+        return _description;
     }
     
     function version() external pure override returns (uint256) {

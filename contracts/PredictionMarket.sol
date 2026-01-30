@@ -381,6 +381,93 @@ contract PredictionMarket {
     }
     
     /**
+     * @dev Create next round if current round is closed
+     * @notice Public function to manually create a new round when current is closed
+     */
+    function createNextRound() external {
+        Round storage round = rounds[currentRound];
+        
+        // Only create new round if current is closed
+        require(round.status == RoundStatus.Closed, "Current round must be closed");
+        
+        // Check if next round already exists
+        require(rounds[currentRound + 1].roundId == 0, "Next round already exists");
+        
+        // Create new round
+        currentRound++;
+        _createRound();
+    }
+    
+    /**
+     * @dev Check if upkeep is needed (for Chainlink Automation)
+     * @return upkeepNeeded Whether upkeep is needed
+     * @return performData Data to pass to performUpkeep
+     */
+    function checkUpkeep(bytes calldata) 
+        external 
+        view 
+        returns (bool upkeepNeeded, bytes memory performData) 
+    {
+        Round storage round = rounds[currentRound];
+        
+        // Check if round needs to be locked
+        bool shouldLock = block.timestamp >= round.lockTimestamp && 
+                          round.status == RoundStatus.Open;
+        
+        // Check if round needs to be closed
+        bool shouldClose = block.timestamp >= round.closeTimestamp && 
+                           round.status == RoundStatus.Locked &&
+                           !round.oracleCalled;
+        
+        // Check if new round needs to be created
+        bool shouldCreate = round.status == RoundStatus.Closed && 
+                           rounds[currentRound + 1].roundId == 0;
+        
+        upkeepNeeded = shouldLock || shouldClose || shouldCreate;
+        return (upkeepNeeded, "");
+    }
+    
+    /**
+     * @dev Perform upkeep (for Chainlink Automation)
+     * @notice Automatically locks, closes, or creates rounds as needed
+     */
+    function performUpkeep(bytes calldata) external {
+        uint256 roundId = currentRound;
+        Round storage round = rounds[roundId];
+        
+        // Lock if needed
+        if (block.timestamp >= round.lockTimestamp && 
+            round.status == RoundStatus.Open) {
+            this.lockRound(roundId);
+            // After locking, currentRound increments, so we're done for this call
+            return;
+        }
+        
+        // Close if needed - refresh round reference
+        round = rounds[roundId];
+        if (round.status == RoundStatus.Locked &&
+            block.timestamp >= round.closeTimestamp &&
+            !round.oracleCalled) {
+            this.closeRound(roundId);
+            // After closing, check if we need to create next round
+            round = rounds[currentRound]; // Refresh after close
+            if (round.status == RoundStatus.Closed && 
+                rounds[currentRound + 1].roundId == 0) {
+                currentRound++;
+                _createRound();
+            }
+            return;
+        }
+        
+        // Create next round if current is closed and next doesn't exist
+        if (round.status == RoundStatus.Closed && 
+            rounds[currentRound + 1].roundId == 0) {
+            currentRound++;
+            _createRound();
+        }
+    }
+    
+    /**
      * @dev Emergency function to refund users if oracle fails
      * @param roundId Round ID to refund
      */

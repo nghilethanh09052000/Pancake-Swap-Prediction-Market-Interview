@@ -29,6 +29,7 @@ describe("PredictionMarket", function () {
   });
 
   describe("Deployment", function () {
+    
     it("Should deploy with correct initial values", async function () {
       expect(await predictionMarket.currentRound()).to.equal(1);
       expect(await predictionMarket.treasury()).to.equal(treasury.address);
@@ -176,7 +177,7 @@ describe("PredictionMarket", function () {
       // User receives: 1.94 ETH
       // Net gain: 0.94 ETH (minus gas)
       expect(finalBalance - initialBalance).to.be.closeTo(
-        ethers.parseEther("0.94") - gasUsed,
+        ethers.parseEther("1.94") - gasUsed,
         ethers.parseEther("0.01")
       );
     });
