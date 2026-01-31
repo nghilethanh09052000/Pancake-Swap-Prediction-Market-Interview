@@ -460,3 +460,4 @@ contract MultiCoinPredictionMarket {
     }
 }
 
+

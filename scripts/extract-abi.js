@@ -26,3 +26,4 @@ try {
   console.log('Make sure to compile contracts first: npm run compile');
 }
 
+

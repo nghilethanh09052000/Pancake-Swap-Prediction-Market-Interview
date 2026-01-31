@@ -1,10 +1,15 @@
 # Prediction Market - PancakeSwap Style
 
-A decentralized prediction market on BNB Chain where users can bet on BNB price movements in 5-minute rounds.
+A full-stack decentralized prediction market application where users can bet on BTC, ETH, and BNB price movements in 5-minute rounds.
 
 ## Overview
 
-This project implements a PancakeSwap-style prediction market where users bet on whether the BNB price will go **UP (Bull)** or **DOWN (Bear)** within a 5-minute timeframe.
+This project implements a PancakeSwap-style prediction market with a complete web application stack:
+- **Smart Contracts**: Multi-coin prediction market supporting BTC, ETH, and BNB
+- **Frontend**: Modern Next.js application with wallet integration
+- **Backend**: NestJS API for contract interactions and data aggregation
+
+Users bet on whether crypto prices will go **UP (Bull)** or **DOWN (Bear)** within 5-minute timeframes.
 
 ## Smart Contract Flow
 
@@ -136,32 +141,98 @@ User Receives = Payout - Fee
 - Emergency refund function available (treasury only)
 - All users get refunded
 
-## Contract Architecture
+## Project Architecture
 
-### Main Contract: `PredictionMarket.sol`
+### Smart Contracts
 
-**Key State Variables:**
-- `currentRound`: Current active round number
-- `rounds[roundId]`: Round data mapping
-- `userBets[user][roundId]`: User bet data mapping
-- `priceOracle`: Chainlink AggregatorV3Interface
+**Main Contract: `MultiCoinPredictionMarket.sol`**
+- Multi-coin support (BTC, ETH, BNB)
+- Separate rounds per coin
+- Chainlink oracle integration per coin
+- Key State Variables:
+  - `currentRound[Coin]`: Current active round number per coin
+  - `rounds[Coin][roundId]`: Round data mapping
+  - `userBets[Coin][user][roundId]`: User bet data mapping
+  - `priceOracles[Coin]`: Chainlink oracle per coin
+- Key Functions:
+  - `bet(Coin, Position)`: Place a bet on a specific coin
+  - `lockRound(Coin, uint256)`: Lock round and fetch lock price
+  - `closeRound(Coin, uint256)`: Close round and determine winners
+  - `claim(Coin, uint256)`: Claim winnings
+  - `calculatePayout(...)`: View function to calculate potential payout
 
-**Key Functions:**
-- `bet(Position)`: Place a bet
-- `lockRound(uint256)`: Lock round and fetch lock price
-- `closeRound(uint256)`: Close round and determine winners
-- `claim(uint256)`: Claim winnings
-- `calculatePayout(...)`: View function to calculate potential payout
+**Legacy Contract: `PredictionMarket.sol`**
+- Single-coin (BNB) version
+- Still available for reference
 
-### Supporting Contract: `MockPriceOracle.sol`
-
-- Mock Chainlink oracle for testing
+**Supporting Contract: `MockPriceOracle.sol`**
+- Mock Chainlink oracle for local testing
 - Allows setting prices manually
 - Implements `AggregatorV3Interface`
 
+### Frontend (Next.js)
+
+- **Framework**: Next.js 14 with TypeScript
+- **Wallet Integration**: RainbowKit + Wagmi
+- **Styling**: Tailwind CSS
+- **Features**:
+  - Multi-coin selector (BTC, ETH, BNB)
+  - Real-time round information
+  - Betting interface with Bull/Bear selection
+  - User bet tracking and history
+  - Claim winnings functionality
+  - Responsive design
+
+### Backend (NestJS)
+
+- **Framework**: NestJS with TypeScript
+- **Features**:
+  - RESTful API endpoints
+  - Contract interaction service
+  - Price fetching from oracles
+  - Round data aggregation
+  - User bet queries
+  - Payout calculations
+
+## Quick Start
+
+For a complete setup guide, see **[QUICK_START.md](./QUICK_START.md)** or **[WEB_SETUP.md](./WEB_SETUP.md)**.
+
+### Quick Setup (5 minutes)
+
+1. **Start Hardhat Node:**
+   ```bash
+   npm run node
+   ```
+
+2. **Deploy Multi-Coin Contract:**
+   ```bash
+   npm run deploy:multi
+   ```
+   Copy the contract address from output.
+
+3. **Setup Backend:**
+   ```bash
+   cd backend
+   npm install
+   # Create .env with CONTRACT_ADDRESS from step 2
+   npm run start:dev
+   ```
+
+4. **Setup Frontend:**
+   ```bash
+   cd frontend
+   npm install
+   # Create .env.local with NEXT_PUBLIC_CONTRACT_ADDRESS from step 2
+   npm run dev
+   ```
+
+5. **Open Browser:**
+   Navigate to `http://localhost:3000` and connect your wallet.
+
 ## Setup Instructions
 
-### 1. Install Dependencies
+### 1. Install Root Dependencies
 
 ```bash
 npm install
@@ -181,9 +252,16 @@ npm run test
 
 ### 4. Deploy Contracts
 
-**Local Network:**
+**Local Network (Multi-Coin):**
 ```bash
-npx hardhat node
+npm run node
+# In another terminal:
+npm run deploy:multi
+```
+
+**Local Network (Single-Coin BNB):**
+```bash
+npm run node
 # In another terminal:
 npm run deploy
 ```
@@ -191,32 +269,60 @@ npm run deploy
 **BSC Testnet:**
 ```bash
 # Update hardhat.config.js with your private key
-npx hardhat run scripts/deploy.js --network bscTestnet
+npx hardhat run scripts/deploy-multi-coin.js --network bscTestnet
 ```
 
 **BSC Mainnet:**
 ```bash
 # Update hardhat.config.js with your private key
-# Use real Chainlink oracle: 0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE
-npx hardhat run scripts/deploy.js --network bsc
+# Use real Chainlink oracles (see Chainlink Oracle Addresses section)
+npx hardhat run scripts/deploy-multi-coin.js --network bsc
 ```
+
+### 5. Extract Contract ABI (for frontend)
+
+```bash
+npm run extract-abi
+```
+
+This updates the frontend with the latest contract ABI.
 
 ## Chainlink Oracle Addresses
 
 ### BSC Mainnet
 - **BNB/USD**: `0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE`
+- **BTC/USD**: `0x264990fbd0A4796A3E3d8E37C4d5F87a3ALE5F0`
+- **ETH/USD**: `0x9ef1B8c0E4F7dc8bF5719Ea496883DC6401d5b2e`
 
 ### BSC Testnet
 - **BNB/USD**: `0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526`
+- **BTC/USD**: `0x5741306c21795FdCBb9b265Ea0255F499DFe515C`
+- **ETH/USD**: `0x143db3CEEfbdfe5631aDD3E50f7614B6ba708BA7`
 
 ## Key Features
 
+### Smart Contracts
+✅ **Multi-coin support** - Bet on BTC, ETH, and BNB  
 ✅ **5-minute round cycles** - Fast-paced betting  
-✅ **Chainlink oracle integration** - Reliable price feeds  
+✅ **Chainlink oracle integration** - Reliable price feeds per coin  
 ✅ **Proportional payouts** - Winners share the pool  
 ✅ **3% treasury fee** - Sustainable revenue model  
 ✅ **Tie handling** - House wins on ties  
-✅ **Emergency refunds** - Oracle failure protection  
+✅ **Emergency refunds** - Oracle failure protection
+
+### Frontend
+✅ **Modern UI** - Beautiful, responsive design similar to PancakeSwap  
+✅ **Wallet integration** - Connect with MetaMask or any Web3 wallet  
+✅ **Real-time updates** - Live round information and countdowns  
+✅ **Multi-coin selector** - Switch between BTC, ETH, and BNB  
+✅ **Betting interface** - Easy Bull/Bear selection  
+✅ **User dashboard** - Track your bets and winnings
+
+### Backend
+✅ **RESTful API** - Clean API endpoints for contract data  
+✅ **Round aggregation** - Efficient round data queries  
+✅ **Price fetching** - Oracle price retrieval  
+✅ **Payout calculations** - Real-time payout estimates  
 
 ## Security Considerations
 
@@ -226,16 +332,87 @@ npx hardhat run scripts/deploy.js --network bsc
 - Reentrancy protection (using checks-effects-interactions)
 - Access control for treasury functions
 
+## API Endpoints
+
+The backend provides the following endpoints (default: `http://localhost:3001`):
+
+- `GET /api/prediction/round/:coin` - Get current round (BTC/ETH/BNB)
+- `GET /api/prediction/round/:coin/:roundId` - Get specific round
+- `GET /api/prediction/price/:coin` - Get current price
+- `GET /api/prediction/user-bet/:coin/:address/:roundId` - Get user bet
+- `GET /api/prediction/payout/:coin/:roundId?position=bull&amount=0.1` - Calculate payout
+
+## Development
+
+### Running All Services
+
+**Terminal 1 - Hardhat Node:**
+```bash
+npm run node
+```
+
+**Terminal 2 - Backend:**
+```bash
+cd backend && npm run start:dev
+```
+
+**Terminal 3 - Frontend:**
+```bash
+cd frontend && npm run dev
+```
+
+**Terminal 4 - Automation (Optional):**
+```bash
+npm run automate
+```
+
+## Documentation
+
+- **[QUICK_START.md](./QUICK_START.md)** - Quick 5-minute setup guide
+- **[WEB_SETUP.md](./WEB_SETUP.md)** - Detailed web application setup
+- **[README_WEB.md](./README_WEB.md)** - Full-stack application overview
+- **[SMART_CONTRACT_FLOW.md](./SMART_CONTRACT_FLOW.md)** - Detailed contract flow documentation
+- **[scripts/AUTOMATION_README.md](./scripts/AUTOMATION_README.md)** - Round automation guide
+
 ## Future Enhancements
 
-- [ ] Frontend interface
-- [ ] Round history tracking
+- [ ] Round history tracking UI
 - [ ] Leaderboard system
-- [ ] Multiple token support (ETH, BTC, etc.)
 - [ ] Staking mechanism
 - [ ] Referral system
+- [ ] Mobile app
+- [ ] Advanced analytics and charts
+- [ ] Social features (sharing bets, following users)
+
+## Project Structure
+
+```
+INTERVIEW-Blockchain/
+├── contracts/                    # Smart contracts
+│   ├── MultiCoinPredictionMarket.sol  # Main multi-coin contract
+│   ├── PredictionMarket.sol           # Legacy single-coin contract
+│   └── MockPriceOracle.sol            # Mock oracle for testing
+├── frontend/                     # Next.js frontend application
+│   ├── app/                      # Next.js 14 app directory
+│   ├── components/               # React components
+│   └── config/                   # Contract configuration
+├── backend/                      # NestJS backend API
+│   └── src/
+│       ├── prediction/           # Prediction module
+│       └── main.ts               # Entry point
+├── scripts/                      # Deployment and utility scripts
+│   ├── deploy-multi-coin.js     # Multi-coin deployment
+│   ├── deploy.js                # Single-coin deployment
+│   ├── extract-abi.js           # ABI extraction
+│   └── automate-rounds.js       # Round automation
+└── test/                         # Contract tests
+```
 
 ## License
 
 MIT
+
+## Credits
+
+Inspired by PancakeSwap Prediction Market
 
