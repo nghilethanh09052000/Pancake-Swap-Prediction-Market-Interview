@@ -13,9 +13,10 @@ interface Props {
   totalBear: bigint
   userBet: any
   refetch: () => void
+  compact?: boolean
 }
 
-export function BettingCard({ coin, coinEnum, roundId, totalBull, totalBear, userBet, refetch }: Props) {
+export function BettingCard({ coin, coinEnum, roundId, totalBull, totalBear, userBet, refetch, compact = false }: Props) {
   const [betAmount, setBetAmount] = useState('0.01')
   const [selectedPosition, setSelectedPosition] = useState<'bull' | 'bear' | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -60,20 +61,115 @@ export function BettingCard({ coin, coinEnum, roundId, totalBull, totalBear, use
   const bullOdds = totalBull > 0n ? Number(totalPool) / Number(totalBull) : 0
   const bearOdds = totalBear > 0n ? Number(totalPool) / Number(totalBear) : 0
 
+  // Compact mode for inline betting
+  if (compact) {
+    return (
+      <div>
+        {userBet && Number(userBet[4]) > 0 ? (
+          <div className="bg-blue-900/30 border border-blue-500 rounded-lg p-3 text-center">
+            <p className="text-blue-300 text-sm">
+              ✓ Bet placed: {formatEther(userBet[4])} ETH on{' '}
+              {Number(userBet[3]) === 0 ? 'UP' : 'DOWN'}
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Position Selection */}
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <button
+                onClick={() => setSelectedPosition('bull')}
+                className={`p-4 rounded-lg border-2 transition-all ${
+                  selectedPosition === 'bull'
+                    ? 'border-green-500 bg-green-500/20 text-green-400'
+                    : 'border-gray-600 text-gray-300 hover:border-green-500/50'
+                }`}
+              >
+                <div className="text-2xl mb-1">🐂</div>
+                <div className="font-bold text-sm">UP</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {formatEther(totalBull)} ETH
+                </div>
+              </button>
+
+              <button
+                onClick={() => setSelectedPosition('bear')}
+                className={`p-4 rounded-lg border-2 transition-all ${
+                  selectedPosition === 'bear'
+                    ? 'border-red-500 bg-red-500/20 text-red-400'
+                    : 'border-gray-600 text-gray-300 hover:border-red-500/50'
+                }`}
+              >
+                <div className="text-2xl mb-1">🐻</div>
+                <div className="font-bold text-sm">DOWN</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {formatEther(totalBear)} ETH
+                </div>
+              </button>
+            </div>
+
+            {/* Bet Amount - Compact */}
+            <input
+              type="number"
+              step="0.001"
+              min="0.001"
+              value={betAmount}
+              onChange={(e) => setBetAmount(e.target.value)}
+              className="w-full bg-black/30 text-white rounded-lg px-3 py-2 mb-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="Amount (ETH)"
+            />
+
+            {/* Quick Amounts - Compact */}
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {['0.01', '0.1', '0.5', '1'].map((amount) => (
+                <button
+                  key={amount}
+                  onClick={() => setBetAmount(amount)}
+                  className="bg-black/30 hover:bg-black/50 text-white rounded px-2 py-1 text-xs transition-colors"
+                >
+                  {amount}
+                </button>
+              ))}
+            </div>
+
+            {/* Submit Button - Compact */}
+            <button
+              onClick={handleBet}
+              disabled={!selectedPosition || isPending || isConfirming || isSubmitting}
+              className={`w-full font-bold py-3 rounded-lg transition-colors ${
+                selectedPosition === 'bull'
+                  ? 'bg-green-500 hover:bg-green-600'
+                  : selectedPosition === 'bear'
+                  ? 'bg-red-500 hover:bg-red-600'
+                  : 'bg-gray-600'
+              } disabled:bg-gray-600 disabled:cursor-not-allowed text-white`}
+            >
+              {isPending || isConfirming || isSubmitting
+                ? 'Processing...'
+                : selectedPosition
+                ? `Enter ${selectedPosition === 'bull' ? 'UP' : 'DOWN'}`
+                : 'Select UP or DOWN'}
+            </button>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // Full mode
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <h3 className="text-2xl font-bold text-white mb-6">Place Your Bet</h3>
 
-      {userBet && Number(userBet[3]) > 0 && (
+      {userBet && Number(userBet[4]) > 0 && (
         <div className="bg-blue-900/30 border border-blue-500 rounded-lg p-4 mb-6">
           <p className="text-blue-300">
-            You already bet {formatEther(userBet[3])} ETH on{' '}
-            {Number(userBet[2]) === 0 ? 'Bull' : 'Bear'}
+            You already bet {formatEther(userBet[4])} ETH on{' '}
+            {Number(userBet[3]) === 0 ? 'Bull' : 'Bear'}
           </p>
         </div>
       )}
 
-      {!userBet || Number(userBet[3]) === 0 ? (
+      {!userBet || Number(userBet[4]) === 0 ? (
         <>
           {/* Position Selection */}
           <div className="grid grid-cols-2 gap-4 mb-6">

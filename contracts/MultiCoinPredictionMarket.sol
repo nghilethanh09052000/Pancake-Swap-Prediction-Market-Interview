@@ -9,8 +9,11 @@ import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
  * @notice Users bet on whether crypto prices will go UP (Bull) or DOWN (Bear) in 5-minute rounds
  */
 contract MultiCoinPredictionMarket {
-    // Round duration: 5 minutes (300 seconds)
+    // Round duration: 5 minutes (300 seconds) - betting period
     uint256 public constant ROUND_DURATION = 300;
+    
+    // Close delay: 60 seconds after lock for oracle call
+    uint256 public constant CLOSE_DELAY = 60;
     
     // Treasury fee: 3% (30 basis points out of 1000)
     uint256 public constant TREASURY_FEE = 30;
@@ -145,8 +148,8 @@ contract MultiCoinPredictionMarket {
     function _createRound(Coin coin) internal {
         uint256 roundId = currentRound[coin];
         uint256 startTimestamp = block.timestamp;
-        uint256 lockTimestamp = startTimestamp + ROUND_DURATION;
-        uint256 closeTimestamp = lockTimestamp + ROUND_DURATION;
+        uint256 lockTimestamp = startTimestamp + ROUND_DURATION; // 5 minutes for betting
+        uint256 closeTimestamp = lockTimestamp + CLOSE_DELAY; // 60 seconds after lock to close
         
         rounds[coin][roundId] = Round({
             roundId: roundId,
@@ -199,6 +202,16 @@ contract MultiCoinPredictionMarket {
         require(round.status == RoundStatus.Open, "Round not open");
         require(!hasBet[coin][roundId][msg.sender], "Already bet in this round");
         
+        // Check if previous round needs to be closed
+        if (roundId > 1) {
+            Round storage previousRound = rounds[coin][roundId - 1];
+            if (previousRound.status == RoundStatus.Locked && 
+                block.timestamp >= previousRound.closeTimestamp && 
+                !previousRound.oracleCalled) {
+                _closeRound(coin, roundId - 1);
+            }
+        }
+        
         userBets[coin][roundId][msg.sender] = Bet({
             user: msg.sender,
             roundId: roundId,
@@ -218,13 +231,14 @@ contract MultiCoinPredictionMarket {
         
         emit BetPlaced(msg.sender, coin, roundId, position, msg.value);
         
+        // Auto-lock and start next round if time reached
         if (block.timestamp >= round.lockTimestamp) {
             lockRound(coin, roundId);
         }
     }
     
     /**
-     * @dev Lock the round
+     * @dev Lock the round and start next round
      */
     function lockRound(Coin coin, uint256 roundId) public validRound(coin, roundId) {
         Round storage round = rounds[coin][roundId];
@@ -240,14 +254,20 @@ contract MultiCoinPredictionMarket {
         
         emit RoundLocked(coin, roundId, price);
         
+        // Start next round immediately so users can bet while current round closes
         currentRound[coin]++;
         _createRound(coin);
+        
+        // If enough time has passed, also close the round
+        if (block.timestamp >= round.closeTimestamp) {
+            _closeRound(coin, roundId);
+        }
     }
     
     /**
-     * @dev Close the round
+     * @dev Close the round (internal function)
      */
-    function closeRound(Coin coin, uint256 roundId) external validRound(coin, roundId) {
+    function _closeRound(Coin coin, uint256 roundId) internal validRound(coin, roundId) {
         Round storage round = rounds[coin][roundId];
         
         require(block.timestamp >= round.closeTimestamp, "Too early to close");
@@ -271,6 +291,13 @@ contract MultiCoinPredictionMarket {
         }
         
         emit RoundClosed(coin, roundId, price, winner);
+    }
+    
+    /**
+     * @dev Close the round (external function)
+     */
+    function closeRound(Coin coin, uint256 roundId) external validRound(coin, roundId) {
+        _closeRound(coin, roundId);
     }
     
     /**
@@ -329,11 +356,11 @@ contract MultiCoinPredictionMarket {
         AggregatorV3Interface oracle = priceOracles[coin];
         
         (
-            uint80 roundID,
+            ,
             int256 price,
-            uint256 startedAt,
+            ,
             uint256 timeStamp,
-            uint80 answeredInRound
+            
         ) = oracle.latestRoundData();
         
         require(timeStamp > 0, "Round not complete");

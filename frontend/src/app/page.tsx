@@ -2,6 +2,7 @@
 
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { PredictionMarket } from '@/components/PredictionMarket'
+import { CryptoPriceTicker } from '@/components/CryptoPriceTicker'
 import { useState } from 'react'
 
 type Coin = 'BTC' | 'ETH' | 'BNB'
@@ -11,6 +12,9 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800">
+      {/* Live Price Ticker - Full Width at Top */}
+      <CryptoPriceTicker />
+      
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <header className="flex justify-between items-center mb-8">

@@ -8,11 +8,25 @@
     "test": "hardhat test",
     "deploy": "hardhat run scripts/deploy.js",
     "deploy:multi": "hardhat run scripts/deploy-multi-coin.js --network localhost",
+    "deploy:mocks": "hardhat run scripts/deploy-with-live-mocks.js --network localhost",
+    "deploy:real": "hardhat run scripts/deploy-multi-coin-real-oracles.js --network localhost",
+    "deploy:testnet": "hardhat run scripts/deploy-multi-coin-real-oracles.js --network bscTestnet",
     "node": "hardhat node",
+    "node:fork": "hardhat node --fork https://bsc-dataseed.binance.org/",
+    "create-rounds": "hardhat run scripts/create-initial-rounds.js --network localhost",
     "automate": "node scripts/automate-rounds.js",
+    "automate:multi": "node scripts/automate-multi-coin.js",
+    "automate:all": "hardhat run scripts/automate-everything.js --network localhost",
+    "update-prices": "hardhat run scripts/update-mock-prices.js --network localhost",
     "extract-abi": "node scripts/extract-abi.js"
   },
-  "keywords": ["blockchain", "prediction", "market", "bnb", "pancakeswap"],
+  "keywords": [
+    "blockchain",
+    "prediction",
+    "market",
+    "bnb",
+    "pancakeswap"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -21,7 +35,7 @@
   },
   "dependencies": {
     "@chainlink/contracts": "^0.6.1",
-    "@openzeppelin/contracts": "^5.0.0"
+    "@openzeppelin/contracts": "^5.0.0",
+    "dotenv": "^17.2.3"
   }
 }
-

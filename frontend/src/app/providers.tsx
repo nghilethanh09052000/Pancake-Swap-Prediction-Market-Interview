@@ -25,7 +25,7 @@ const localhost = {
 
 const config = getDefaultConfig({
   appName: 'Prediction Market',
-  projectId: 'prediction-market',
+  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID',
   chains: [localhost, bscTestnet, bsc],
   ssr: true,
 })
