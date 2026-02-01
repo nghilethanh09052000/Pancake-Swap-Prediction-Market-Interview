@@ -1,12 +1,9 @@
 'use client'
 
-import { useAccount, useReadContract } from 'wagmi'
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useEffect, useState } from 'react'
-import { formatEther, formatUnits } from 'viem'
+import { formatEther, formatUnits, parseEther } from 'viem'
 import { CONTRACT_ABI, CONTRACT_ADDRESS } from '@/config/contract'
-import { BettingCard } from './BettingCard'
-import { UserBets } from './UserBets'
-import { RoundHistory } from './RoundHistory'
 
 type Coin = 'BTC' | 'ETH' | 'BNB'
 
@@ -24,73 +21,168 @@ export function PredictionMarket({ coin }: Props) {
   const { address, isConnected } = useAccount()
   const coinEnum = COIN_TO_ENUM[coin]
   const [currentTime, setCurrentTime] = useState(Math.floor(Date.now() / 1000))
+  const [betAmount, setBetAmount] = useState('0.1')
 
-  // Get current round
-  const { data: currentRoundId, refetch: refetchRoundId } = useReadContract({
+  // Get current round ID
+  const { data: currentRoundId } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: CONTRACT_ABI,
     functionName: 'currentRound',
     args: [coinEnum],
+    query: { refetchInterval: 2000 },
   })
 
-  // Get LIVE round data (current - 1, the one that's locked)
-  const { data: liveRoundData, refetch: refetchLiveRound } = useReadContract({
+  // Fetch multiple rounds for horizontal scroll (like PancakeSwap)
+  const roundIds = currentRoundId && currentRoundId > 2n
+    ? [currentRoundId - 2n, currentRoundId - 1n, currentRoundId]
+    : currentRoundId ? [currentRoundId] : []
+
+  // Fetch round data for each visible round
+  const { data: round1Data } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: CONTRACT_ABI,
     functionName: 'getRound',
-    args: [coinEnum, currentRoundId && currentRoundId > 1n ? currentRoundId - 1n : 1n],
-    query: {
-      enabled: currentRoundId !== undefined && currentRoundId > 1n,
-      refetchInterval: 2000,
-    },
+    args: [coinEnum, roundIds[0] || 1n],
+    query: { enabled: roundIds.length > 0, refetchInterval: 3000 },
   })
 
-  // Get NEXT round data (current round, accepting bets)
-  const { data: nextRoundData, refetch: refetchNextRound } = useReadContract({
+  const { data: round2Data } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: CONTRACT_ABI,
     functionName: 'getRound',
-    args: [coinEnum, currentRoundId || 1n],
-    query: {
-      enabled: currentRoundId !== undefined,
-      refetchInterval: 2000,
-    },
+    args: [coinEnum, roundIds[1] || 1n],
+    query: { enabled: roundIds.length > 1, refetchInterval: 2000 },
   })
 
-  // Get current price from oracle (real-time)
-  const { data: currentPrice, refetch: refetchPrice } = useReadContract({
+  const { data: round3Data } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CONTRACT_ABI,
+    functionName: 'getRound',
+    args: [coinEnum, roundIds[2] || 1n],
+    query: { enabled: roundIds.length > 2, refetchInterval: 2000 },
+  })
+
+  // Get current price
+  const { data: currentPrice } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: CONTRACT_ABI,
     functionName: 'getCurrentPrice',
     args: [coinEnum],
-    query: {
-      refetchInterval: 5000,
-    },
+    query: { refetchInterval: 5000 },
   })
 
-  // Get user bet for NEXT round
-  const { data: userBet, refetch: refetchUserBet } = useReadContract({
+  // Get blockchain time
+  const { data: blockchainTime } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CONTRACT_ABI,
+    functionName: 'getCurrentBlockTimestamp',
+    query: { refetchInterval: 10000 },
+  })
+
+  // Smooth countdown timer
+  useEffect(() => {
+    if (blockchainTime) {
+      setCurrentTime(Number(blockchainTime))
+    }
+    const interval = setInterval(() => {
+      setCurrentTime(prev => prev + 1)
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [blockchainTime])
+
+  // Betting hooks
+  const { writeContract, data: hash, isPending } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+
+  // Claim hooks
+  const { writeContract: writeClaim, data: claimHash, isPending: isClaimPending } = useWriteContract()
+  const { isLoading: isClaimConfirming, isSuccess: isClaimSuccess } = useWaitForTransactionReceipt({ hash: claimHash })
+
+  const placeBet = (position: 'Bull' | 'Bear') => {
+    if (!isConnected) {
+      alert('Please connect your wallet first!')
+      return
+    }
+    writeContract({
+      address: CONTRACT_ADDRESS,
+      abi: CONTRACT_ABI,
+      functionName: 'bet',
+      args: [coinEnum, position === 'Bull' ? 0 : 1],
+      value: parseEther(betAmount),
+    })
+  }
+
+  const claimReward = (roundId: bigint) => {
+    if (!isConnected) {
+      alert('Please connect your wallet first!')
+      return
+    }
+    writeClaim({
+      address: CONTRACT_ADDRESS,
+      abi: CONTRACT_ABI,
+      functionName: 'claim',
+      args: [coinEnum, roundId],
+    })
+  }
+
+  // Parse round data
+  const parseRound = (data: any) => {
+    if (!data || !data.roundId || data.roundId === 0n) return null
+    return {
+      roundId: data.roundId,
+      startTimestamp: data.startTimestamp,
+      lockTimestamp: data.lockTimestamp,
+      closeTimestamp: data.closeTimestamp,
+      lockPrice: data.lockPrice,
+      closePrice: data.closePrice,
+      totalBullAmount: data.totalBullAmount,
+      totalBearAmount: data.totalBearAmount,
+      status: Number(data.status),
+    }
+  }
+
+  const rounds = [parseRound(round1Data), parseRound(round2Data), parseRound(round3Data)].filter(r => r !== null)
+
+  // Fetch user bets for expired rounds (for claiming)
+  const { data: userBet1 } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: CONTRACT_ABI,
     functionName: 'getUserBet',
-    args: [coinEnum, address || '0x0', currentRoundId || 0n],
-    query: {
-      enabled: isConnected && address && currentRoundId !== undefined,
-    },
+    args: [coinEnum, address || '0x0000000000000000000000000000000000000000', rounds[0]?.roundId || 1n],
+    query: { enabled: isConnected && rounds.length > 0 && (rounds[0]?.status === 2 || rounds[0]?.status === 1) },
   })
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(Math.floor(Date.now() / 1000))
-      refetchLiveRound()
-      refetchNextRound()
-      refetchRoundId()
-      refetchPrice()
-      refetchUserBet()
-    }, 1000) // Update every second for countdown
+  const { data: userBet2 } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CONTRACT_ABI,
+    functionName: 'getUserBet',
+    args: [coinEnum, address || '0x0000000000000000000000000000000000000000', rounds[1]?.roundId || 1n],
+    query: { enabled: isConnected && rounds.length > 1 && (rounds[1]?.status === 2 || rounds[1]?.status === 1) },
+  })
 
-    return () => clearInterval(interval)
-  }, [refetchLiveRound, refetchNextRound, refetchRoundId, refetchPrice, refetchUserBet])
+  const { data: userBet3 } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CONTRACT_ABI,
+    functionName: 'getUserBet',
+    args: [coinEnum, address || '0x0000000000000000000000000000000000000000', rounds[2]?.roundId || 1n],
+    query: { enabled: isConnected && rounds.length > 2 && (rounds[2]?.status === 2 || rounds[2]?.status === 1) },
+  })
+
+  const userBets = [userBet1, userBet2, userBet3]
+
+  // Determine round status (SIMPLE LOGIC)
+  const getRoundStatus = (round: any) => {
+    if (!round || !currentRoundId) return 'expired'
+    
+    // NEXT = Current round (always open for betting)
+    if (round.roundId === currentRoundId) return 'next'
+    
+    // LIVE = Previous round (if it's locked, status=1)
+    if (round.roundId === currentRoundId - 1n && round.status === 1) return 'live'
+    
+    // Everything else = EXPIRED
+    return 'expired'
+  }
 
   const formatTime = (seconds: number) => {
     if (seconds <= 0) return '00:00'
@@ -99,44 +191,39 @@ export function PredictionMarket({ coin }: Props) {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
 
-  const parseLiveRound = (data: any) => {
-    if (!data) return null
-    return {
-      roundId: data[0],
-      coin: data[1],
-      startTimestamp: data[2],
-      lockTimestamp: data[3],
-      closeTimestamp: data[4],
-      lockPrice: data[5],
-      closePrice: data[6],
-      totalBullAmount: data[7],
-      totalBearAmount: data[8],
-      oracleCalled: data[9],
-      status: Number(data[10]),
-    }
+  const formatPrice = (price: bigint) => {
+    return `$${parseFloat(formatUnits(price, 8)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  const parseNextRound = (data: any) => {
-    if (!data) return null
-    return {
-      roundId: data[0],
-      coin: data[1],
-      startTimestamp: data[2],
-      lockTimestamp: data[3],
-      closeTimestamp: data[4],
-      lockPrice: data[5],
-      closePrice: data[6],
-      totalBullAmount: data[7],
-      totalBearAmount: data[8],
-      oracleCalled: data[9],
-      status: Number(data[10]),
-    }
+  const calculatePayout = (round: any, position: 'Bull' | 'Bear') => {
+    if (!round || round.totalBullAmount === 0n || round.totalBearAmount === 0n) return '0.00'
+    const totalPool = round.totalBullAmount + round.totalBearAmount
+    const winningPool = position === 'Bull' ? round.totalBullAmount : round.totalBearAmount
+    if (winningPool === 0n) return '0.00'
+    const payout = (Number(formatEther(totalPool)) / Number(formatEther(winningPool))) * 0.97
+    return payout.toFixed(2)
   }
 
-  const liveRound = parseLiveRound(liveRoundData)
-  const nextRound = parseNextRound(nextRoundData)
+  // Check if user won a round
+  const checkUserWon = (round: any, userBet: any) => {
+    if (!round || !userBet || !round.lockPrice || !round.closePrice) return false
+    if (!userBet.user || userBet.user === '0x0000000000000000000000000000000000000000') return false
+    
+    // Determine winner: 0=Bull, 1=Bear
+    let winner: number
+    if (round.closePrice > round.lockPrice) {
+      winner = 0 // Bull wins
+    } else if (round.closePrice < round.lockPrice) {
+      winner = 1 // Bear wins
+    } else {
+      return true // Tie - everyone can claim refund
+    }
+    
+    const userPosition = Number(userBet.position)
+    return userPosition === winner
+  }
 
-  if (!nextRound) {
+  if (!currentRoundId || rounds.length === 0) {
     return (
       <div className="bg-gray-800 rounded-lg p-8 text-center">
         <p className="text-gray-400">Loading round data...</p>
@@ -144,370 +231,332 @@ export function PredictionMarket({ coin }: Props) {
     )
   }
 
-  const liveTimeRemaining = liveRound ? Number(liveRound.closeTimestamp) - currentTime : 0
-  const nextTimeUntilLock = Number(nextRound.lockTimestamp) - currentTime
-
-  const calculatePriceChange = () => {
-    if (!liveRound || !liveRound.lockPrice || !currentPrice) return null
-    const lockPrice = Number(formatUnits(liveRound.lockPrice, 8))
-    const current = Number(formatUnits(currentPrice, 8))
-    const change = current - lockPrice
-    const percentChange = (change / lockPrice) * 100
-    return { change, percentChange, isUp: change > 0 }
-  }
-
-  const priceChange = calculatePriceChange()
-
-  const calculatePayout = (round: any, position: 'Bull' | 'Bear') => {
-    if (!round || round.totalBullAmount === 0n || round.totalBearAmount === 0n) return '0.00'
-    const totalPool = round.totalBullAmount + round.totalBearAmount
-    const winningPool = position === 'Bull' ? round.totalBullAmount : round.totalBearAmount
-    if (winningPool === 0n) return '0.00'
-    const payout = Number(formatEther(totalPool)) / Number(formatEther(winningPool))
-    return payout.toFixed(2)
-  }
-
-  // Calculate progress for visual timeline
-  const calculateProgress = (round: any) => {
-    if (!round) return 0
-    const totalDuration = Number(round.lockTimestamp) - Number(round.startTimestamp) // 5 minutes = 300 seconds
-    const elapsed = currentTime - Number(round.startTimestamp)
-    const progress = Math.min(Math.max((elapsed / totalDuration) * 100, 0), 100)
-    return progress
-  }
-
-  const nextRoundProgress = calculateProgress(nextRound)
-  const ROUND_DURATION = 300 // 5 minutes in seconds
+  // Get the current round to calculate global timer
+  const currentRound = rounds.find(r => r && r.roundId === currentRoundId)
+  const globalTimeRemaining = currentRound 
+    ? Number(currentRound.lockTimestamp) - currentTime 
+    : 0
 
   return (
     <div className="space-y-6">
-      {/* Round Timeline Indicator */}
-      <div className="bg-gray-800 rounded-xl p-6 border-2 border-gray-700">
-        <h3 className="text-xl font-bold text-white mb-4 text-center">
-          ⏱️ Round Timeline - 5 Minute Intervals
-        </h3>
-        
-        <div className="space-y-4">
-          {/* Timeline Visualization */}
-          <div className="relative">
-            {/* Timeline Bar */}
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-400">Round #{nextRound.roundId.toString()}</span>
-              <span className="text-sm text-purple-400 font-semibold">
-                {Math.floor(nextTimeUntilLock / 60)}:{String(nextTimeUntilLock % 60).padStart(2, '0')} until lock
-              </span>
-            </div>
-            
-            {/* Progress Bar */}
-            <div className="relative h-8 bg-gray-700 rounded-full overflow-hidden">
-              <div 
-                className="absolute h-full bg-gradient-to-r from-purple-600 to-blue-600 transition-all duration-1000"
-                style={{ width: `${nextRoundProgress}%` }}
-              >
-                <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-              </div>
-              
-              {/* Time Labels */}
-              <div className="absolute inset-0 flex items-center justify-between px-4 text-xs font-semibold text-white">
-                <span>0:00</span>
-                <span>1:15</span>
-                <span>2:30</span>
-                <span>3:45</span>
-                <span>5:00 🔒</span>
-              </div>
-            </div>
-            
-            {/* Phase Labels */}
-            <div className="flex justify-between mt-2 text-xs text-gray-400">
-              <span>Betting Open</span>
-              <span>Round Locks</span>
-            </div>
-          </div>
-
-          {/* Live Round Info (if exists) */}
-          {liveRound && liveRound.status === 1 && (
-            <div className="border-t border-gray-700 pt-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-400">Round #{liveRound.roundId.toString()} (LIVE)</span>
-                <span className="text-sm text-green-400 font-semibold">
-                  {Math.floor(liveTimeRemaining / 60)}:{String(liveTimeRemaining % 60).padStart(2, '0')} until close
-                </span>
-              </div>
-              
-              {/* Live Progress Bar */}
-              <div className="relative h-6 bg-gray-700 rounded-full overflow-hidden">
-                <div 
-                  className="absolute h-full bg-gradient-to-r from-green-600 to-green-400"
-                  style={{ width: `${Math.min((60 - liveTimeRemaining) / 60 * 100, 100)}%` }}
-                >
-                  <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                </div>
-                
-                <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white">
-                  LOCKED - Closing Soon
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Info Box */}
-          <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-3">
-            <div className="flex items-start gap-2">
-              <span className="text-blue-400 text-xl">ℹ️</span>
-              <div className="text-sm text-gray-300">
-                <p className="font-semibold text-blue-400 mb-1">How it works:</p>
-                <ul className="space-y-1 text-xs">
-                  <li>• <span className="text-purple-400">NEXT Round</span>: Open for 5 minutes - Place your bets!</li>
-                  <li>• <span className="text-green-400">LIVE Round</span>: Locked for 1 minute - Watch results!</li>
-                  <li>• After LIVE closes, NEXT becomes LIVE and a new NEXT round starts</li>
-                </ul>
-              </div>
-            </div>
-          </div>
+      {/* Global Timer - Top Right */}
+      <div className="flex justify-end">
+        <div className="bg-purple-600 text-white px-6 py-3 rounded-full font-bold text-xl flex items-center gap-2">
+          ⏱️ {formatTime(Math.max(0, globalTimeRemaining))} 
+          <span className="text-sm opacity-75">5m</span>
         </div>
       </div>
 
-      {/* Main Cards: LIVE and NEXT */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LIVE ROUND - Locked, No Betting */}
-        {liveRound && liveRound.status === 1 ? (
-          <div className="bg-gradient-to-br from-green-900/40 to-green-800/40 rounded-2xl p-6 border-2 border-green-500/50 relative overflow-hidden">
-            {/* Animated background */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/10 rounded-full blur-3xl"></div>
+      {/* Horizontal Scrolling Cards (PancakeSwap Style) */}
+          <div className="relative">
+        <div className="flex gap-6 overflow-x-auto pb-6 px-2 snap-x snap-mandatory">
+          {rounds.map((round: any, index: number) => {
+            const status = getRoundStatus(round)
+            const isLive = status === 'live'
+            const isNext = status === 'next'
+            const isExpired = status === 'expired'
             
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-green-400 font-bold text-lg">LIVE</span>
-              </div>
-              <span className="text-white/60 font-semibold">#{liveRound.roundId.toString()}</span>
+            const timeRemaining = isLive 
+              ? Number(round.closeTimestamp) - currentTime
+              : isNext
+              ? Number(round.lockTimestamp) - currentTime
+              : 0
+            
+            const progress = isLive || isNext
+              ? Math.min(Math.max((timeRemaining / 300) * 100, 0), 100)
+              : 0
+
+            // LIVE round finished = treat as expired for display
+            const liveFinished = isLive && timeRemaining <= 0
+            const showAsExpired = isExpired || liveFinished
+
+            // Check if user won this round (for expired/finished rounds)
+            const userBet = userBets[index]
+            const userWon = showAsExpired && checkUserWon(round, userBet)
+
+            return (
+              <div key={round.roundId.toString()} className="flex-shrink-0 w-[420px] snap-center">
+                <div className="relative">
+                  {/* Status Badge */}
+                  <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10">
+                    {showAsExpired && (
+                      <div className="bg-gradient-to-r from-gray-600 to-gray-700 px-6 py-2 rounded-full shadow-lg">
+                        <span className="text-white font-bold text-sm">EXPIRED</span>
+                      </div>
+                    )}
+                    {isLive && !liveFinished && (
+                      <div className="bg-gradient-to-r from-red-500 to-pink-500 px-6 py-2 rounded-full shadow-lg flex items-center gap-2">
+                        <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                        <span className="text-white font-bold text-sm">● LIVE</span>
+                      </div>
+                    )}
+                    {isNext && (
+                      <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-6 py-2 rounded-full shadow-lg">
+                        <span className="text-white font-bold text-sm">NEXT</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card */}
+                  <div className={`bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 border-2 shadow-2xl mt-2 ${
+                    isLive && !liveFinished ? 'border-red-500/30' : 
+                    isNext ? 'border-blue-500/30' : 
+                    'border-gray-700/30'
+                  }`}>
+                    {/* Round Number - NO TIMER */}
+                    <div className="text-center mb-4 mt-2">
+                      <div className="text-gray-400 text-sm">#{round.roundId.toString()}</div>
             </div>
 
-            {/* Countdown */}
-            <div className="text-center mb-6">
-              <p className="text-white/60 text-sm mb-2">Closes In</p>
-              <div className="flex items-center justify-center gap-4">
-                {/* Circular Progress */}
-                <div className="relative w-16 h-16">
-                  <svg className="transform -rotate-90 w-16 h-16">
-                    <circle
-                      cx="32"
-                      cy="32"
-                      r="28"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                      fill="none"
-                      className="text-gray-700"
-                    />
-                    <circle
-                      cx="32"
-                      cy="32"
-                      r="28"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                      fill="none"
-                      strokeDasharray={`${2 * Math.PI * 28}`}
-                      strokeDashoffset={`${2 * Math.PI * 28 * (1 - liveTimeRemaining / 60)}`}
-                      className="text-green-400 transition-all duration-1000"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-xs text-green-400 font-bold">{Math.ceil(liveTimeRemaining / 60)}m</span>
+                    {/* EXPIRED ROUND */}
+                    {isExpired && round.lockPrice && round.closePrice && (
+                      <div className="space-y-3">
+                        <div className={`rounded-xl p-4 text-center ${
+                          round.closePrice > round.lockPrice
+                            ? 'bg-green-500/20 border border-green-500/50'
+                            : round.closePrice < round.lockPrice
+                            ? 'bg-red-500/20 border border-red-500/50'
+                            : 'bg-gray-500/20 border border-gray-500/50'
+                        }`}>
+                          <div className="text-2xl font-bold mb-1">
+                            {round.closePrice > round.lockPrice && '🐂 UP'}
+                            {round.closePrice < round.lockPrice && '🐻 DOWN'}
+                            {round.closePrice === round.lockPrice && '🤝 TIE'}
+                          </div>
+                          <div className="text-sm text-gray-300">
+                            {formatPrice(round.lockPrice)} → {formatPrice(round.closePrice)}
                   </div>
                 </div>
                 
-                <p className="text-5xl font-bold text-white mb-1">{formatTime(liveTimeRemaining)}</p>
+                        <div className="bg-gray-800/50 rounded-lg p-3">
+                          <div className="text-gray-400 text-xs mb-1">Prize Pool</div>
+                          <div className="text-white font-bold">
+                            {formatEther(round.totalBullAmount + round.totalBearAmount)} ETH
               </div>
             </div>
 
-            {/* Current Price vs Lock Price */}
-            <div className="bg-black/30 rounded-xl p-4 mb-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-white/60 text-sm">Last Price</span>
-                <span className="text-white/60 text-sm">Locked Price</span>
+                        {/* Collect Button - ONLY for winners */}
+                        {isConnected && userWon ? (
+                          <button
+                            onClick={() => claimReward(round.roundId)}
+                            disabled={isClaimPending || isClaimConfirming}
+                            className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed"
+                          >
+                            {isClaimPending || isClaimConfirming ? (
+                              <span className="flex items-center justify-center gap-2">
+                                <span className="animate-spin">⏳</span>
+                                {isClaimPending ? 'Confirm...' : 'Claiming...'}
+                              </span>
+                            ) : isClaimSuccess ? (
+                              '✅ Claimed!'
+                            ) : (
+                              '💰 Collect'
+                            )}
+                          </button>
+                        ) : !isConnected ? (
+                          <div className="text-center text-gray-500 text-sm py-3">
+                            Connect wallet to collect
               </div>
-              <div className="flex justify-between items-center">
-                <div className="text-left">
-                  <p className="text-2xl font-bold text-white">
-                    ${currentPrice ? formatUnits(currentPrice, 8) : '--'}
-                  </p>
-                  {priceChange && (
-                    <p className={`text-sm font-semibold ${priceChange.isUp ? 'text-green-400' : 'text-red-400'}`}>
-                      {priceChange.isUp ? '▲' : '▼'} ${Math.abs(priceChange.change).toFixed(2)} ({priceChange.percentChange.toFixed(2)}%)
-                    </p>
-                  )}
+                        ) : userBet && userBet.user && userBet.user !== '0x0000000000000000000000000000000000000000' ? (
+                          <div className="text-center text-red-400 text-sm py-3 bg-red-500/10 rounded-lg">
+                            😢 You didn't win this round
                 </div>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-white/80">
-                    ${formatUnits(liveRound.lockPrice || 0n, 8)}
-                  </p>
-                  <p className="text-sm text-white/60">at lock</p>
+                        ) : null}
                 </div>
+                    )}
+
+                    {/* LIVE ROUND */}
+                    {isLive && !liveFinished && (
+                      <div className="space-y-3">
+                        {/* Last Price Label */}
+                        <div className="text-center mb-3">
+                          <div className="text-gray-400 text-xs mb-2">LAST PRICE</div>
+                          <div className="text-white font-bold text-3xl">{currentPrice ? formatPrice(currentPrice) : '...'}</div>
+                          {currentPrice && round.lockPrice && currentPrice !== round.lockPrice && (
+                            <div className={`text-sm mt-1 font-bold ${
+                              currentPrice > round.lockPrice ? 'text-green-400' : 'text-red-400'
+                            }`}>
+                              {currentPrice > round.lockPrice ? '▲' : '▼'} 
+                              {currentPrice > round.lockPrice ? '$' : '$-'}
+                              {Math.abs(Number(formatUnits(currentPrice - round.lockPrice, 8))).toFixed(2)}
+              </div>
+                          )}
+            </div>
+
+                        <div className="bg-gray-900/50 rounded-lg p-3">
+                          <div className="text-gray-400 text-xs mb-1">Locked Price</div>
+                          <div className="text-white font-bold text-lg">{formatPrice(round.lockPrice)}</div>
+                </div>
+
+                        <div className="bg-gray-900/50 rounded-lg p-3">
+                          <div className="text-gray-400 text-xs mb-1">Prize Pool</div>
+                          <div className="text-white font-bold text-lg">
+                            {formatEther(round.totalBullAmount + round.totalBearAmount)} ETH
               </div>
             </div>
 
-            {/* Prize Pool */}
-            <div className="bg-black/30 rounded-xl p-4">
-              <p className="text-white/60 text-sm mb-2 text-center">Prize Pool</p>
-              <p className="text-3xl font-bold text-white text-center">
-                {formatEther((liveRound.totalBullAmount || 0n) + (liveRound.totalBearAmount || 0n))} {coin === 'BTC' ? 'BTC' : coin === 'ETH' ? 'ETH' : 'BNB'}
-              </p>
-              <div className="flex justify-between mt-3 text-sm">
-                <div className="text-green-400">
-                  <span className="font-semibold">UP:</span> {formatEther(liveRound.totalBullAmount || 0n)}
-                </div>
-                <div className="text-red-400">
-                  <span className="font-semibold">DOWN:</span> {formatEther(liveRound.totalBearAmount || 0n)}
-                </div>
-              </div>
+                        {/* UP/DOWN indicators */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-green-500/10 rounded-lg p-3 text-center">
+                            <div className="text-green-400 font-bold text-sm mb-1">0x Payout</div>
+                            <div className="text-green-400 text-2xl font-bold">UP</div>
             </div>
-
-            {/* Live Status Indicator */}
-            <div className="mt-4 text-center">
-              <p className="text-white/40 text-xs">🔒 Round locked - No betting allowed</p>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-gradient-to-br from-gray-800/40 to-gray-700/40 rounded-2xl p-6 border-2 border-gray-600/50">
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="text-6xl mb-4">⏳</div>
-                <p className="text-white/60 text-lg">Waiting for LIVE round...</p>
-                <p className="text-white/40 text-sm mt-2">First round is starting</p>
+                          <div className="bg-red-500/10 rounded-lg p-3 text-center">
+                            <div className="text-red-400 font-bold text-sm mb-1">0x Payout</div>
+                            <div className="text-red-400 text-2xl font-bold">DOWN</div>
               </div>
             </div>
           </div>
         )}
 
-        {/* NEXT ROUND - Open for Betting */}
-        <div className="bg-gradient-to-br from-purple-900/40 to-blue-900/40 rounded-2xl p-6 border-2 border-purple-500/50 relative overflow-hidden">
-          {/* Animated background */}
-          <div className="absolute top-0 left-0 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl"></div>
-          
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-              <span className="text-purple-400 font-bold text-lg">NEXT</span>
+                    {/* LIVE ROUND FINISHED - Show as EXPIRED with collect button */}
+                    {liveFinished && currentPrice && round.lockPrice && (
+                      <div className="space-y-3">
+                        <div className={`rounded-xl p-4 text-center ${
+                          currentPrice > round.lockPrice
+                            ? 'bg-green-500/20 border border-green-500/50'
+                            : currentPrice < round.lockPrice
+                            ? 'bg-red-500/20 border border-red-500/50'
+                            : 'bg-gray-500/20 border border-gray-500/50'
+                        }`}>
+                          <div className="text-2xl font-bold mb-1">
+                            {currentPrice > round.lockPrice && '🐂 UP'}
+                            {currentPrice < round.lockPrice && '🐻 DOWN'}
+                            {currentPrice === round.lockPrice && '🤝 TIE'}
+                          </div>
+                          <div className="text-sm text-gray-300">
+                            {formatPrice(round.lockPrice)} → {formatPrice(currentPrice)}
+                          </div>
+                        </div>
+
+                        <div className="bg-gray-800/50 rounded-lg p-3">
+                          <div className="text-gray-400 text-xs mb-1">Prize Pool</div>
+                          <div className="text-white font-bold">
+                            {formatEther(round.totalBullAmount + round.totalBearAmount)} ETH
+                          </div>
+                        </div>
+
+                        {/* Collect Button - ONLY for winners */}
+                        {isConnected && userWon ? (
+                          <button
+                            onClick={() => claimReward(round.roundId)}
+                            disabled={isClaimPending || isClaimConfirming}
+                            className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed"
+                          >
+                            {isClaimPending || isClaimConfirming ? (
+                              <span className="flex items-center justify-center gap-2">
+                                <span className="animate-spin">⏳</span>
+                                {isClaimPending ? 'Confirm...' : 'Claiming...'}
+                              </span>
+                            ) : isClaimSuccess ? (
+                              '✅ Claimed!'
+                            ) : (
+                              '💰 Collect'
+                            )}
+                          </button>
+                        ) : !isConnected ? (
+                          <div className="text-center text-gray-500 text-sm py-3">
+                            Connect wallet to collect
+                          </div>
+                        ) : userBet && userBet.user && userBet.user !== '0x0000000000000000000000000000000000000000' ? (
+                          <div className="text-center text-red-400 text-sm py-3 bg-red-500/10 rounded-lg">
+                            😢 You didn't win this round
+                          </div>
+                        ) : null}
             </div>
-            <span className="text-white/60 font-semibold">#{nextRound.roundId.toString()}</span>
+                    )}
+
+                    {/* NEXT ROUND */}
+                    {isNext && (
+                      <div className="space-y-3">
+                        {/* Prize Pool Header */}
+                        <div className="bg-gray-900/50 rounded-lg p-3">
+                          <div className="text-gray-400 text-xs mb-1">Prize Pool:</div>
+                          <div className="text-white font-bold text-lg">&lt;0.0001 ETH</div>
           </div>
 
-          {/* Entry Countdown */}
-          <div className="text-center mb-6">
-            <p className="text-white/60 text-sm mb-2">Entry closes in</p>
-            <div className="flex items-center justify-center gap-4">
-              {/* Circular Progress */}
-              <div className="relative w-16 h-16">
-                <svg className="transform -rotate-90 w-16 h-16">
-                  <circle
-                    cx="32"
-                    cy="32"
-                    r="28"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    fill="none"
-                    className="text-gray-700"
-                  />
-                  <circle
-                    cx="32"
-                    cy="32"
-                    r="28"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    fill="none"
-                    strokeDasharray={`${2 * Math.PI * 28}`}
-                    strokeDashoffset={`${2 * Math.PI * 28 * (nextTimeUntilLock / ROUND_DURATION)}`}
-                    className="text-purple-400 transition-all duration-1000"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xs text-purple-400 font-bold">{Math.ceil(nextTimeUntilLock / 60)}m</span>
-                </div>
+                        {/* Bet Amount Input */}
+                        <div>
+                          <label className="text-gray-400 text-xs mb-2 block">Bet Amount (ETH)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={betAmount}
+                            onChange={(e) => setBetAmount(e.target.value)}
+                            disabled={isPending || isConfirming || isSuccess}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono text-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                            placeholder="0.1"
+                          />
               </div>
               
-              <p className="text-5xl font-bold text-white mb-1">{formatTime(nextTimeUntilLock)}</p>
+                        {/* Bet Buttons */}
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => placeBet('Bull')}
+                            disabled={isPending || isConfirming || isSuccess || !isConnected}
+                            className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 px-4 rounded-xl transition-all disabled:cursor-not-allowed"
+                          >
+                            <div className="text-sm">Enter UP</div>
+                          </button>
+                          <button
+                            onClick={() => placeBet('Bear')}
+                            disabled={isPending || isConfirming || isSuccess || !isConnected}
+                            className="w-full bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 px-4 rounded-xl transition-all disabled:cursor-not-allowed"
+                          >
+                            <div className="text-sm">Enter DOWN</div>
+                          </button>
             </div>
             
-            {/* Progress Bar */}
-            <div className="mt-4 w-full bg-gray-700 rounded-full h-2 overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all duration-1000"
-                style={{ width: `${100 - (nextTimeUntilLock / ROUND_DURATION * 100)}%` }}
-              />
+                        {isSuccess && (
+                          <div className="bg-green-500/20 border border-green-500/50 rounded-lg p-2 text-center text-green-400 text-sm font-bold">
+                            ✅ Bet placed!
+                          </div>
+                        )}
+
+                        {/* UP/DOWN pools */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-green-500/10 rounded-lg p-3 text-center">
+                            <div className="text-green-400 font-bold text-sm mb-1">0x Payout</div>
+                            <div className="text-green-400 text-2xl font-bold">UP</div>
             </div>
-            <div className="flex justify-between mt-1 text-xs text-gray-400">
-              <span>Start</span>
-              <span className="text-purple-400 font-semibold">{Math.floor((ROUND_DURATION - nextTimeUntilLock) / 60)}:{String((ROUND_DURATION - nextTimeUntilLock) % 60).padStart(2, '0')} elapsed</span>
-              <span>5:00</span>
+                          <div className="bg-pink-500/10 rounded-lg p-3 text-center">
+                            <div className="text-pink-400 font-bold text-sm mb-1">0x Payout</div>
+                            <div className="text-pink-400 text-2xl font-bold">DOWN</div>
             </div>
           </div>
-
-          {/* Prize Pool */}
-          <div className="bg-black/30 rounded-xl p-4 mb-4">
-            <p className="text-white/60 text-sm mb-2 text-center">Prize Pool</p>
-            <p className="text-3xl font-bold text-white text-center">
-              {formatEther((nextRound.totalBullAmount || 0n) + (nextRound.totalBearAmount || 0n))} {coin === 'BTC' ? 'BTC' : coin === 'ETH' ? 'ETH' : 'BNB'}
-            </p>
           </div>
-
-          {/* Betting Buttons */}
-          {nextRound.status === 0 && nextTimeUntilLock > 0 ? (
-            <div className="space-y-3">
-              <BettingCard
-                coin={coin}
-                coinEnum={coinEnum}
-                roundId={nextRound.roundId}
-                totalBull={nextRound.totalBullAmount}
-                totalBear={nextRound.totalBearAmount}
-                userBet={userBet}
-                refetch={refetchNextRound}
-                compact={true}
-              />
-              
-              {/* Payout Info */}
-              <div className="flex justify-between text-sm bg-black/30 rounded-lg p-3">
-                <div className="text-center flex-1">
-                  <p className="text-green-400 font-semibold">{calculatePayout(nextRound, 'Bull')}x</p>
-                  <p className="text-white/60 text-xs">UP Payout</p>
+                    )}
                 </div>
-                <div className="border-l border-white/20"></div>
-                <div className="text-center flex-1">
-                  <p className="text-red-400 font-semibold">{calculatePayout(nextRound, 'Bear')}x</p>
-                  <p className="text-white/60 text-xs">DOWN Payout</p>
                 </div>
               </div>
+            )
+          })}
             </div>
-          ) : (
-            <div className="bg-black/30 rounded-xl p-4 text-center">
-              <p className="text-yellow-400 font-semibold">🔒 Round Locking Soon</p>
-              <p className="text-white/60 text-sm mt-1">Wait for next round</p>
-            </div>
-          )}
+
+        <div className="text-center text-gray-500 text-sm mt-2">
+          ← Scroll to view all rounds →
         </div>
       </div>
 
-      {/* Additional Info Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* User Bets */}
-        <div className="lg:col-span-1">
-        <UserBets
-          coin={coin}
-          coinEnum={coinEnum}
-          userBet={userBet}
-            round={nextRound}
-            refetch={refetchNextRound}
-          />
+      {/* Info Section */}
+      <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700/50">
+        <h3 className="text-white font-bold mb-4">📖 How It Works</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <div className="text-blue-400 font-bold mb-2">1️⃣ NEXT Round (5 min)</div>
+            <div className="text-gray-400">Place your bet - Will price go UP or DOWN?</div>
+          </div>
+          <div>
+            <div className="text-red-400 font-bold mb-2">2️⃣ LIVE Round (5 min)</div>
+            <div className="text-gray-400">Watch in real-time - Price locked, waiting for results</div>
+          </div>
+          <div>
+            <div className="text-green-400 font-bold mb-2">3️⃣ Results</div>
+            <div className="text-gray-400">Winners split the pool - Up to 98% returns!</div>
         </div>
-
-        {/* Round History */}
-        <div className="lg:col-span-2">
-          <RoundHistory coin={coin} currentRoundId={currentRoundId} />
         </div>
       </div>
     </div>
   )
 }
+

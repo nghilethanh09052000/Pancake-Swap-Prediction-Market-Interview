@@ -1,6 +1,16 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
+
 const nextConfig = {
   reactStrictMode: true,
+  
+  // Turbopack configuration (Next.js 16+)
+  turbopack: {
+    // Set absolute root path to silence warning
+    root: path.resolve(__dirname, '..'),
+  },
+  
+  // Webpack fallback (only used if --webpack flag is passed)
   webpack: (config, { isServer }) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,
@@ -9,14 +19,13 @@ const nextConfig = {
       tls: false,
     };
     
-    // Ignore optional peer dependencies that are not needed in browser
+    // Ignore optional peer dependencies
     config.resolve.alias = {
       ...config.resolve.alias,
       '@react-native-async-storage/async-storage': false,
       'pino-pretty': false,
     };
     
-    // Ignore these modules in webpack
     if (!isServer) {
       config.externals = config.externals || [];
       config.externals.push({
@@ -30,5 +39,3 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
-
-

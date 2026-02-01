@@ -16,16 +16,21 @@ export function CryptoPriceTicker() {
   const [priceChanges, setPriceChanges] = useState<{ [key: number]: 'up' | 'down' | 'same' }>({})
 
   return (
-    <div className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 border-b-2 border-gray-700">
-      <div className="container mx-auto px-4 py-3">
+    <div className="bg-gray-900/95 backdrop-blur-md border-b border-gray-700/50 sticky top-0 z-50 shadow-2xl">
+      <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-green-400 text-lg animate-pulse">●</span>
-            <span className="text-white font-semibold text-sm">LIVE PRICES</span>
-            <span className="text-gray-400 text-xs">Updates every 8s</span>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <span className="absolute inset-0 text-green-400 text-lg animate-ping opacity-75">●</span>
+              <span className="relative text-green-400 text-lg">●</span>
+            </div>
+            <div>
+              <span className="text-white font-bold text-sm tracking-wide">LIVE PRICES</span>
+              <div className="text-gray-500 text-xs">Updates every 8 seconds</div>
+            </div>
           </div>
           
-          <div className="flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-4 flex-wrap">
             {COINS.map((coin) => (
               <CoinPrice
                 key={coin.enum}
@@ -85,7 +90,8 @@ function CoinPrice({ coin, previousPrices, setPreviousPrices, priceChanges, setP
     if (currentPrice) {
       setPreviousPrices(prev => ({ ...prev, [coin.enum]: currentPrice }))
     }
-  }, [currentPrice, coin.enum, previousPrices, setPreviousPrices, setPriceChanges])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPrice, coin.enum])
 
   const priceChangeClass = 
     priceChanges[coin.enum] === 'up' ? 'bg-green-500/20 border-green-500' :
@@ -109,24 +115,35 @@ function CoinPrice({ coin, previousPrices, setPreviousPrices, priceChanges, setP
   }) : '--'
 
   return (
-    <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 ${priceChangeClass}`}>
-      <div className="flex items-center gap-2">
-        <span className={`text-2xl ${coin.color}`}>{coin.icon}</span>
+    <div className={`group relative flex items-center gap-3 px-5 py-3 rounded-xl border-2 transition-all duration-500 ${priceChangeClass} hover:scale-105 hover:shadow-2xl`}>
+      <div className="flex items-center gap-3">
+        <div className={`text-3xl font-bold ${coin.color} drop-shadow-lg`}>{coin.icon}</div>
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-white font-bold text-sm">{coin.name}</span>
-            <span className={`text-xs ${priceChangeColor}`}>{priceChangeIcon}</span>
+            <span className="text-white font-bold text-base">{coin.name}</span>
+            <span className={`text-sm font-bold ${priceChangeColor} transition-all duration-300 ${
+              priceChanges[coin.enum] !== 'same' ? 'scale-125 animate-bounce' : ''
+            }`}>
+              {priceChangeIcon}
+            </span>
           </div>
-          <span className="text-gray-400 text-xs">{coin.symbol}</span>
+          <span className="text-gray-400 text-xs font-medium">{coin.symbol}</span>
         </div>
       </div>
       
-      <div className="text-right">
-        <div className="text-white font-bold text-lg font-mono">
+      <div className="text-right ml-4">
+        <div className="text-white font-bold text-xl font-mono tracking-tight">
           ${formattedPrice}
         </div>
-        <div className="text-xs text-gray-400">USD</div>
+        <div className="text-xs text-gray-500 font-medium">USD</div>
       </div>
+
+      {/* Animated background glow */}
+      {priceChanges[coin.enum] !== 'same' && (
+        <div className={`absolute inset-0 rounded-xl opacity-50 blur-xl ${
+          priceChanges[coin.enum] === 'up' ? 'bg-green-500/30' : 'bg-red-500/30'
+        } animate-pulse`}></div>
+      )}
     </div>
   )
 }

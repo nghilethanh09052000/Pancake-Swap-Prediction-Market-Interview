@@ -190,6 +190,13 @@ contract MultiCoinPredictionMarket {
     }
     
     /**
+     * @dev Get current blockchain timestamp
+     */
+    function getCurrentBlockTimestamp() external view returns (uint256) {
+        return block.timestamp;
+    }
+    
+    /**
      * @dev Place a bet
      */
     function bet(Coin coin, Position position) external payable {

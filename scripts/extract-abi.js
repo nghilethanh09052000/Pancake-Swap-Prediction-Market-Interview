@@ -9,7 +9,7 @@ try {
   const abi = artifact.abi;
   
   // Write to frontend config
-  const frontendConfigPath = path.join(__dirname, '../frontend/config/contract.ts');
+  const frontendConfigPath = path.join(__dirname, '../frontend/src/config/contract.ts');
   let configContent = fs.readFileSync(frontendConfigPath, 'utf8');
   
   // Replace the ABI array
@@ -20,7 +20,7 @@ try {
   );
   
   fs.writeFileSync(frontendConfigPath, configContent);
-  console.log('✅ ABI extracted and updated in frontend/config/contract.ts');
+  console.log('✅ ABI extracted and updated in frontend/src/config/contract.ts');
 } catch (error) {
   console.error('❌ Error extracting ABI:', error.message);
   console.log('Make sure to compile contracts first: npm run compile');

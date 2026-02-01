@@ -1,11 +1,11 @@
 const hre = require("hardhat");
 
 // Configuration - UPDATE THESE AFTER EACH DEPLOYMENT!
-const MARKET_ADDRESS = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
+const MARKET_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9";
 const ORACLES = {
-  BTC: "0x0165878A594ca255338adfa4d48449f69242Eb8F",
-  ETH: "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
-  BNB: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+  BTC: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  ETH: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  BNB: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
 };
 
 const BASE_PRICES = {
@@ -85,10 +85,10 @@ async function checkAndExecuteForCoin(coinEnum, coinName) {
     const now = block.timestamp;
     
     console.log(`\n🎲 ${coinName} Round ${currentRoundId.toString()}:`);
-    console.log(`   Status: ${round.status === 0 ? "Open" : round.status === 1 ? "Locked" : "Closed"}`);
+    console.log(`   Status: ${Number(round.status) === 0 ? "Open" : Number(round.status) === 1 ? "Locked" : "Closed"}`);
     
     // 1. Check if round should be locked
-    if (round.status === 0 && now >= Number(round.lockTimestamp)) {
+    if (Number(round.status) === 0 && now >= Number(round.lockTimestamp)) {
       console.log(`   🔒 Locking ${coinName} round ${currentRoundId.toString()}...`);
       const tx = await market.lockRound(coinEnum, currentRoundId);
       await tx.wait();
@@ -97,7 +97,7 @@ async function checkAndExecuteForCoin(coinEnum, coinName) {
     }
     
     // 2. Check if round should be closed
-    if (round.status === 1 && now >= Number(round.closeTimestamp) && !round.oracleCalled) {
+    if (Number(round.status) === 1 && now >= Number(round.closeTimestamp) && !round.oracleCalled) {
       console.log(`   🔚 Closing ${coinName} round ${currentRoundId.toString()}...`);
       const tx = await market.closeRound(coinEnum, currentRoundId);
       await tx.wait();
@@ -106,32 +106,40 @@ async function checkAndExecuteForCoin(coinEnum, coinName) {
     }
     
     // 3. Check if new round should be created
-    if (round.status === 2) {
+    if (Number(round.status) === 2) {
+      console.log(`   ⚠️  Round is closed. Checking if next round exists...`);
       const nextRoundId = currentRoundId + 1n;
       try {
         const nextRound = await market.getRound(coinEnum, nextRoundId);
+        // If next round doesn't exist (roundId is 0) or is also closed, create a new one
         if (nextRound.roundId === 0n) {
-          console.log(`   🆕 Creating next ${coinName} round...`);
+          console.log(`   🆕 Creating next ${coinName} round (Round ${nextRoundId})...`);
           const tx = await market.createNextRound(coinEnum);
           await tx.wait();
-          console.log(`   ✅ New ${coinName} round created!`);
+          console.log(`   ✅ ${coinName} Round ${nextRoundId} created!`);
+        } else {
+          console.log(`   ℹ️  Next round already exists (Round ${nextRoundId}, status: ${Number(nextRound.status) === 0 ? 'Open' : Number(nextRound.status) === 1 ? 'Locked' : 'Closed'})`);
         }
       } catch (error) {
-        console.log(`   🆕 Creating next ${coinName} round...`);
-        const tx = await market.createNextRound(coinEnum);
-        await tx.wait();
-        console.log(`   ✅ New ${coinName} round created!`);
+        console.log(`   🆕 Creating next ${coinName} round (Round ${nextRoundId})...`);
+        try {
+          const tx = await market.createNextRound(coinEnum);
+          await tx.wait();
+          console.log(`   ✅ ${coinName} Round ${nextRoundId} created!`);
+        } catch (createError) {
+          console.error(`   ❌ Failed to create round:`, createError.message);
+        }
       }
       return;
     }
     
     // 4. Show time until next action
-    if (round.status === 0) {
+    if (Number(round.status) === 0) {
       const timeUntilLock = Number(round.lockTimestamp) - now;
       const minutes = Math.floor(timeUntilLock / 60);
       const seconds = timeUntilLock % 60;
       console.log(`   ⏰ Round locks in ${minutes}m ${seconds}s`);
-    } else if (round.status === 1) {
+    } else if (Number(round.status) === 1) {
       const timeUntilClose = Number(round.closeTimestamp) - now;
       const minutes = Math.floor(timeUntilClose / 60);
       const seconds = timeUntilClose % 60;
