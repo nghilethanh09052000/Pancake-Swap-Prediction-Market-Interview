@@ -143,13 +143,13 @@ export function PredictionMarket({ coin }: Props) {
 
   const rounds = [parseRound(round1Data), parseRound(round2Data), parseRound(round3Data)].filter(r => r !== null)
 
-  // Fetch user bets for expired rounds (for claiming)
+  // Fetch user bets for all rounds (for claiming and checking if already bet)
   const { data: userBet1 } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: CONTRACT_ABI,
     functionName: 'getUserBet',
     args: [coinEnum, address || '0x0000000000000000000000000000000000000000', rounds[0]?.roundId || 1n],
-    query: { enabled: isConnected && rounds.length > 0 && (rounds[0]?.status === 2 || rounds[0]?.status === 1) },
+    query: { enabled: isConnected && rounds.length > 0 },
   })
 
   const { data: userBet2 } = useReadContract({
@@ -157,7 +157,7 @@ export function PredictionMarket({ coin }: Props) {
     abi: CONTRACT_ABI,
     functionName: 'getUserBet',
     args: [coinEnum, address || '0x0000000000000000000000000000000000000000', rounds[1]?.roundId || 1n],
-    query: { enabled: isConnected && rounds.length > 1 && (rounds[1]?.status === 2 || rounds[1]?.status === 1) },
+    query: { enabled: isConnected && rounds.length > 1 },
   })
 
   const { data: userBet3 } = useReadContract({
@@ -165,10 +165,16 @@ export function PredictionMarket({ coin }: Props) {
     abi: CONTRACT_ABI,
     functionName: 'getUserBet',
     args: [coinEnum, address || '0x0000000000000000000000000000000000000000', rounds[2]?.roundId || 1n],
-    query: { enabled: isConnected && rounds.length > 2 && (rounds[2]?.status === 2 || rounds[2]?.status === 1) },
+    query: { enabled: isConnected && rounds.length > 2 },
   })
 
   const userBets = [userBet1, userBet2, userBet3]
+
+  // Check if user has already bet in a round
+  const hasUserBet = (userBet: any) => {
+    if (!userBet) return false
+    return userBet.user && userBet.user !== '0x0000000000000000000000000000000000000000' && userBet.amount > 0n
+  }
 
   // Determine round status (SIMPLE LOGIC)
   const getRoundStatus = (round: any) => {
@@ -273,6 +279,9 @@ export function PredictionMarket({ coin }: Props) {
             // Check if user won this round (for expired/finished rounds)
             const userBet = userBets[index]
             const userWon = showAsExpired && checkUserWon(round, userBet)
+            
+            // Check if user has already bet in this round (for NEXT rounds)
+            const hasAlreadyBet = hasUserBet(userBet)
 
             return (
               <div key={round.roundId.toString()} className="flex-shrink-0 w-[420px] snap-center">
@@ -282,20 +291,20 @@ export function PredictionMarket({ coin }: Props) {
                     {showAsExpired && (
                       <div className="bg-gradient-to-r from-gray-600 to-gray-700 px-6 py-2 rounded-full shadow-lg">
                         <span className="text-white font-bold text-sm">EXPIRED</span>
-                      </div>
+                </div>
                     )}
                     {isLive && !liveFinished && (
                       <div className="bg-gradient-to-r from-red-500 to-pink-500 px-6 py-2 rounded-full shadow-lg flex items-center gap-2">
                         <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
                         <span className="text-white font-bold text-sm">● LIVE</span>
-                      </div>
+              </div>
                     )}
                     {isNext && (
                       <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-6 py-2 rounded-full shadow-lg">
                         <span className="text-white font-bold text-sm">NEXT</span>
-                      </div>
-                    )}
-                  </div>
+            </div>
+          )}
+      </div>
 
                   {/* Card */}
                   <div className={`bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 border-2 shadow-2xl mt-2 ${
@@ -475,7 +484,24 @@ export function PredictionMarket({ coin }: Props) {
                           <div className="text-white font-bold text-lg">&lt;0.0001 ETH</div>
           </div>
 
-                        {/* Bet Amount Input */}
+                        {/* Show user's bet if already placed */}
+                        {hasAlreadyBet && userBet && (
+                          <div className="bg-blue-500/20 border border-blue-500/50 rounded-lg p-3">
+                            <div className="text-center text-blue-400 font-bold text-sm mb-2">
+                              ✅ Your Bet Placed
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="text-gray-400">Amount:</div>
+                              <div className="text-white font-bold">{formatEther(userBet.amount)} ETH</div>
+                              <div className="text-gray-400">Position:</div>
+                              <div className={`font-bold ${Number(userBet.position) === 0 ? 'text-green-400' : 'text-pink-400'}`}>
+                                {Number(userBet.position) === 0 ? '🐂 UP' : '🐻 DOWN'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Bet Amount Input - Disabled if already bet */}
                         <div>
                           <label className="text-gray-400 text-xs mb-2 block">Bet Amount (ETH)</label>
                           <input
@@ -483,31 +509,31 @@ export function PredictionMarket({ coin }: Props) {
                             step="0.01"
                             value={betAmount}
                             onChange={(e) => setBetAmount(e.target.value)}
-                            disabled={isPending || isConfirming || isSuccess}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono text-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                            disabled={isPending || isConfirming || isSuccess || hasAlreadyBet}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono text-lg focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0.1"
                           />
               </div>
               
-                        {/* Bet Buttons */}
+                        {/* Bet Buttons - Disabled if already bet */}
                         <div className="space-y-2">
                           <button
                             onClick={() => placeBet('Bull')}
-                            disabled={isPending || isConfirming || isSuccess || !isConnected}
+                            disabled={isPending || isConfirming || isSuccess || !isConnected || hasAlreadyBet}
                             className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 px-4 rounded-xl transition-all disabled:cursor-not-allowed"
                           >
-                            <div className="text-sm">Enter UP</div>
+                            <div className="text-sm">{hasAlreadyBet ? '🔒 Bet Locked' : 'Enter UP'}</div>
                           </button>
                           <button
                             onClick={() => placeBet('Bear')}
-                            disabled={isPending || isConfirming || isSuccess || !isConnected}
+                            disabled={isPending || isConfirming || isSuccess || !isConnected || hasAlreadyBet}
                             className="w-full bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 px-4 rounded-xl transition-all disabled:cursor-not-allowed"
                           >
-                            <div className="text-sm">Enter DOWN</div>
+                            <div className="text-sm">{hasAlreadyBet ? '🔒 Bet Locked' : 'Enter DOWN'}</div>
                           </button>
             </div>
             
-                        {isSuccess && (
+                        {isSuccess && !hasAlreadyBet && (
                           <div className="bg-green-500/20 border border-green-500/50 rounded-lg p-2 text-center text-green-400 text-sm font-bold">
                             ✅ Bet placed!
                           </div>
